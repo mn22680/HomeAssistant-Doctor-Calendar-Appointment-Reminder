@@ -1,0 +1,202 @@
+blueprint:
+  name: Calendar Doctor Appointment Reminder v1.0.0
+  author: mn22680
+  source_url: https://github.com/mn22680/HomeAssistant-Doctor-Calendar-Appointment-Reminder/blob/main/calendar_doctor_appointment_reminder.yaml
+  description: >-
+    **Version 1.0.0**
+
+    Sends a mobile notification before a matching doctor or healthcare calendar
+    appointment. Calendar titles should use this format:
+
+    `[Name] Appointment Type`
+
+    Example: `[Michael] Dentist - Cleaning`
+
+    Add one or more names to match inside `[ ]` and one or more appointment types
+    to find after `]`. Names are exact and case-sensitive. Appointment types are
+    case-insensitive and may appear anywhere after the closing bracket.
+
+    Project: https://github.com/mn22680/HomeAssistant-Doctor-Calendar-Appointment-Reminder
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+
+  input:
+    calendar_section:
+      name: Calendar and reminder time
+      icon: mdi:calendar-heart
+      input:
+        appointment_calendar:
+          name: Calendar
+          description: Select the calendar that contains the appointments.
+          selector:
+            entity:
+              filter:
+                domain: calendar
+
+        reminder_offset:
+          name: When should the reminder be sent?
+          description: Choose how long before the appointment the alert should arrive.
+          default: "-24:00:00"
+          selector:
+            select:
+              mode: dropdown
+              options:
+                - label: 15 minutes before
+                  value: "-00:15:00"
+                - label: 30 minutes before
+                  value: "-00:30:00"
+                - label: 1 hour before
+                  value: "-01:00:00"
+                - label: 2 hours before
+                  value: "-02:00:00"
+                - label: 12 hours before
+                  value: "-12:00:00"
+                - label: 1 day before
+                  value: "-24:00:00"
+                - label: 2 days before
+                  value: "-48:00:00"
+                - label: 1 week before
+                  value: "-168:00:00"
+
+    people_section:
+      name: People
+      icon: mdi:account-multiple
+      input:
+        person_names:
+          name: Names to find inside [ ]
+          description: >-
+            Add each calendar name separately with the Add button. Enter only the
+            name, without brackets. Capitalization must match the calendar exactly:
+            Michael does not match michael. Each event should contain one name,
+            such as [Michael] Dentist.
+          default:
+            - Michael
+          selector:
+            text:
+              multiple: true
+
+    appointment_type_section:
+      name: Appointment Type
+      icon: mdi:stethoscope
+      input:
+        appointment_types:
+          name: Appointment types to find after ]
+          description: >-
+            Add each type separately with the Add button. Enter only the text after
+            the closing bracket. Matching is case-insensitive and allows extra text.
+            Suggestions: Doctor, Primary Care, Pediatrician, Dentist, Orthodontist,
+            Dermatologist, Eye Doctor, Optometrist, Ophthalmologist, Cardiologist,
+            Gynecologist, Physical Therapy, Chiropractor, Specialist, Lab Work,
+            Vaccination, or Telehealth.
+          default:
+            - Doctor
+            - Dentist
+            - Orthodontist
+          selector:
+            text:
+              multiple: true
+
+    notification_section:
+      name: Alert
+      icon: mdi:cellphone-message
+      input:
+        notification_devices:
+          name: Devices to alert
+          description: >-
+            Select one or more phones or tablets registered with the Home Assistant
+            Companion App. Every selected device receives the reminder.
+          selector:
+            device:
+              integration: mobile_app
+              multiple: true
+
+        notification_title:
+          name: Notification title
+          default: Upcoming medical appointment
+          selector:
+            text: {}
+
+        notification_message:
+          name: Notification message
+          description: >-
+            You may use event_name, appointment_time, and calendar_name in this
+            template. Example: {{ event_name }} is at {{ appointment_time }}.
+          default: >-
+            Reminder: {{ event_name }} is scheduled for {{ appointment_time }}.
+          selector:
+            template: {}
+
+        additional_actions:
+          name: Additional actions
+          description: >-
+            Optional actions to run after the alerts, such as a speaker announcement
+            or persistent notification.
+          default: []
+          selector:
+            action: {}
+
+trigger:
+  - platform: calendar
+    event: start
+    entity_id: !input appointment_calendar
+    offset: !input reminder_offset
+
+variables:
+  configured_names: !input person_names
+  configured_types: !input appointment_types
+  notify_devices: !input notification_devices
+  event_name: "{{ trigger.calendar_event.summary | default('', true) }}"
+  calendar_name: "{{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id, true) }}"
+  appointment_time: >-
+    {% set raw_start = trigger.calendar_event.start | default('', true) %}
+    {% if raw_start %}
+      {{ as_timestamp(raw_start) | timestamp_custom('%A, %B %-d at %-I:%M %p', true) }}
+    {% else %}
+      the scheduled time
+    {% endif %}
+  bracket_name: >-
+    {% if '[' in event_name and ']' in event_name %}
+      {{ event_name.split('[', 1)[1].split(']', 1)[0].strip() }}
+    {% else %}
+      {{ '' }}
+    {% endif %}
+  after_bracket: >-
+    {% if ']' in event_name %}
+      {{ event_name.split(']', 1)[1].strip() }}
+    {% else %}
+      {{ '' }}
+    {% endif %}
+  name_matches: "{{ bracket_name in configured_names }}"
+  type_matches: >-
+    {% set content = after_bracket | lower %}
+    {% set ns = namespace(found=false) %}
+    {% for appointment_type in configured_types %}
+      {% if appointment_type | trim and appointment_type | lower in content %}
+        {% set ns.found = true %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.found }}
+
+condition:
+  - condition: template
+    value_template: "{{ name_matches and type_matches }}"
+
+action:
+  - repeat:
+      for_each: "{{ notify_devices }}"
+      sequence:
+        - variables:
+            notify_action: >-
+              notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}
+        - action: "{{ notify_action }}"
+          data:
+            title: !input notification_title
+            message: !input notification_message
+
+  - choose: []
+    default: !input additional_actions
+
+mode: queued
+max: 10
+max_exceeded: warning
