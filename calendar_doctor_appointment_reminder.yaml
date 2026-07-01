@@ -1,9 +1,9 @@
 blueprint:
-  name: Calendar Doctor Appointment Reminder v1.0.0
+  name: Calendar Doctor Appointment Reminder v1.1.0
   author: mn22680
   source_url: https://github.com/mn22680/HomeAssistant-Doctor-Calendar-Appointment-Reminder/blob/main/calendar_doctor_appointment_reminder.yaml
   description: >-
-    **Version 1.0.0**
+    **Version 1.1.0**
 
     Sends a mobile notification before a matching doctor or healthcare calendar
     appointment. Calendar titles should use this format:
@@ -12,9 +12,11 @@ blueprint:
 
     Example: `[Michael] Dentist - Cleaning`
 
-    Add one or more names to match inside `[ ]` and one or more appointment types
-    to find after `]`. Names are exact and case-sensitive. Appointment types are
-    case-insensitive and may appear anywhere after the closing bracket.
+    Add one or more names to match inside `[ ]`, pair each name with its Home
+    Assistant person entity, and add appointment types to find after `]`. Names
+    are exact and case-sensitive. Appointment types are case-insensitive and may
+    appear anywhere after the closing bracket. The alert is sent only if the
+    person named in the matching event is home when the reminder is due.
 
     Project: https://github.com/mn22680/HomeAssistant-Doctor-Calendar-Appointment-Reminder
   domain: automation
@@ -70,11 +72,24 @@ blueprint:
             name, without brackets. Capitalization must match the calendar exactly:
             Michael does not match michael. Each event should contain one name,
             such as [Michael] Dentist.
-          default:
-            - Michael
+          default: []
           selector:
             text:
               multiple: true
+
+        person_entities:
+          name: Matching Home Assistant people
+          description: >-
+            Select the Home Assistant person entities in the same order as the
+            names above. Example: if the names are Staci, Will, Matt, select
+            person.staci first, person.will second, and person.matt third. The
+            reminder is sent only when the matching person is home.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                domain: person
 
     appointment_type_section:
       name: Appointment Type
@@ -144,6 +159,7 @@ trigger:
 
 variables:
   configured_names: !input person_names
+  configured_people: !input person_entities
   configured_types: !input appointment_types
   notify_devices: !input notification_devices
   event_name: "{{ trigger.calendar_event.summary | default('', true) }}"
@@ -168,6 +184,23 @@ variables:
       {{ '' }}
     {% endif %}
   name_matches: "{{ bracket_name in configured_names }}"
+  matched_name_index: >-
+    {% set ns = namespace(index=-1) %}
+    {% for configured_name in configured_names %}
+      {% if ns.index == -1 and configured_name == bracket_name %}
+        {% set ns.index = loop.index0 %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.index }}
+  matched_person_entity: >-
+    {% set person_index = matched_name_index | int(-1) %}
+    {% if person_index >= 0 and person_index < configured_people | count %}
+      {{ configured_people[person_index] }}
+    {% else %}
+      {{ '' }}
+    {% endif %}
+  matched_person_is_home: >-
+    {{ matched_person_entity | length > 0 and is_state(matched_person_entity, 'home') }}
   type_matches: >-
     {% set content = after_bracket | lower %}
     {% set ns = namespace(found=false) %}
@@ -180,7 +213,8 @@ variables:
 
 condition:
   - condition: template
-    value_template: "{{ name_matches and type_matches }}"
+    value_template: >-
+      {{ name_matches and type_matches and matched_person_is_home }}
 
 action:
   - repeat:

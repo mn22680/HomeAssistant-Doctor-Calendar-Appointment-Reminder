@@ -23,6 +23,8 @@ longer description, so `Dentist` matches `Dentist - Cleaning`.
 
 - Select any Home Assistant calendar.
 - Add multiple patient names with the blueprint editor's **Add** button.
+- Pair each calendar name with its Home Assistant `person` entity.
+- Send the alert only when the person named in the event is currently home.
 - Add multiple appointment types without using comma-separated text.
 - Choose a reminder time from 15 minutes to one week before the event.
 - Alert one or more phones or tablets using the Home Assistant Companion App.
@@ -51,6 +53,22 @@ Manual installation path:
 Then open **Settings → Automations & scenes → Blueprints**, find **Calendar
 Doctor Appointment Reminder**, and select **Create automation**.
 
+## Pairing calendar names with people
+
+The two lists in the **People** section use the same order. For calendar events
+such as `[Staci] Dentist`, `[Will] Dentist Appointment`, and `[Matt] Dentist`,
+configure them like this:
+
+| Calendar names | Home Assistant people |
+| --- | --- |
+| Staci | `person.staci` |
+| Will | `person.will` |
+| Matt | `person.matt` |
+
+At the one-day-before trigger, the blueprint finds the bracket name, looks up
+the corresponding person entity, and sends the alert only when that entity is
+`home`. Keep both lists the same length and in the same order.
+
 ## Notes
 
 - Create or edit test calendar events well before their reminder time because
@@ -58,6 +76,8 @@ Doctor Appointment Reminder**, and select **Create automation**.
 - The alert devices must be registered through the Home Assistant Companion App.
 - Each event should have one patient name inside the first pair of brackets.
 - The automation runs only when both a configured name and appointment type match.
+- The default reminder time is one day before the appointment.
+- If the matching person's state is not `home`, no alert is sent.
 
 ## Suggested next improvements
 
